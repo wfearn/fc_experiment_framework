@@ -130,7 +130,12 @@ def run_experiment(corpus_name, model, num_topics=100):
     total_time_start = time.time()
 
     print('Splitting corpus into test and train...')
-    train_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
+    if model == 'semi' or model == 'free' or model == 'fclr': # Is there a better way to do this?
+        corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
+        corpus = corpus[1]
+        train_corpus, dev_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True) # Do I care about the dev corpus?
+    else:
+        train_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
 
     train = train_corpus[1]
     train_labeled_docs = set(train_corpus[0])
