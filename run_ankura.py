@@ -16,7 +16,7 @@ q_map = {
             'supervised' : ankura.anchor.build_supervised_cooccurrence,
             'semi' : ankura.anchor.build_supervised_cooccurrence,
             'vanilla' : ankura.anchor.build_cooccurrence,
-            'fclr' : ankura.anchor.build_labeled_cooccurrence,
+            'fclr' : ankura.anchor.build_labeled_cooccurrence, #Run free classifier topics through logistic regression
         }
 
 corpus_map = {
@@ -142,7 +142,7 @@ def run_experiment(corpus_name, model, num_topics=100):
 
     print('Calculating Q...')
     q_start = time.time()
-    if model == 'free':
+    if model == 'free' or model == 'fclr':
         Q, labels = q_retriever(corpus, label_name, train_labeled_docs)
     elif model == 'supervised':
         Q = q_retriever(train, label_name, train_labeled_docs)
