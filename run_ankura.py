@@ -17,6 +17,7 @@ q_map = {
             'semi' : ankura.anchor.build_supervised_cooccurrence,
             'vanilla' : ankura.anchor.build_cooccurrence,
             'fclr' : ankura.anchor.build_labeled_cooccurrence, #Run free classifier topics through logistic regression
+            'fcdr' : ankura.anchor.build_labeled_cooccurrence,
         }
 
 corpus_map = {
@@ -103,16 +104,35 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
 
     return train_time, apply_time, (count / len(predictions))
 
+def free_classifier_dream_accuracy(corpus, test, label, labeled_docs, topics, c, labels):
+    classifier = ankura.topic.free_classifier_dream(corpus, label, labeled_docs=labeled_docs, topics=topics, C=c, labels=labels)
+
+    contingency = ankura.validate.Contingency()
+
+    start = time.time()
+    for doc in test.documents:
+        gold = doc.metadata[label]
+        pred = classifier(doc)
+        contingency[gold, pred] += 1
+    end = time.time()
+
+    apply_time = end - start
+
+    return 0, apply_time, contingency.accuracy()
+
 def get_free_classifier_accuracy(test, topics, Q, labels, label):
     classifier = ankura.topic.free_classifier(topics, Q, labels)
     ankura.topic.variational_assign(test, topics, Z_ATTR)
 
     print('Getting results from free classifier...')
+    start = time.time()
     contingency = ankura.validate.Contingency()
     for i, doc in enumerate(test.documents):
         contingency[doc.metadata[label], classifier(doc, Z_ATTR)] += 1
+    end = time.time()
+    apply_time = end - start
 
-    return contingency.accuracy()
+    return 0, apply_time, contingency.accuracy()
 
 def run_experiment(corpus_name, model, num_topics=100):
 
@@ -130,7 +150,7 @@ def run_experiment(corpus_name, model, num_topics=100):
     total_time_start = time.time()
 
     print('Splitting corpus into test and train...')
-    if model == 'semi' or model == 'free' or model == 'fclr': # Is there a better way to do this?
+    if model == 'semi' or model == 'free' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
         corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
         corpus = corpus[1]
         train_corpus, dev_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True) # Do I care about the dev corpus?
@@ -147,7 +167,7 @@ def run_experiment(corpus_name, model, num_topics=100):
 
     print('Calculating Q...')
     q_start = time.time()
-    if model == 'free' or model == 'fclr':
+    if model == 'free' or model == 'fclr' or model == 'fcdr':
         Q, labels = q_retriever(corpus, label_name, train_labeled_docs)
     elif model == 'supervised':
         Q = q_retriever(train, label_name, train_labeled_docs)
@@ -167,17 +187,22 @@ def run_experiment(corpus_name, model, num_topics=100):
 
     print('Retrieving topics...')
     topic_start = time.time()
-    topics = ankura.anchor.recover_topics(Q, anchors, 1e-5)
+    c, topics = ankura.anchor.recover_topics(Q, anchors, 1e-5, get_c=True)
     topic_end = time.time()
     
     topic_time = topic_end - topic_start
     
     print('Calculating accuracy...')
-    train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name) if model == 'free' else get_logistic_regression_accuracy(train, test, train_target, test_target, topics)
+    if model == 'free':
+        train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name)  
+    elif model == 'fcdr':
+        train_time, apply_time, accuracy = free_classifier_dream_accuracy(corpus, test, label_name, train_labeled_docs, topics, c, labels)
+    else:
+        train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics)
     print('Accuracy is:', accuracy)
 
     summary = ankura.topic.topic_summary(topics)
-    coherence = ankura.validate.coherence(train, summary)
+    coherence = ankura.validate.coherence(corpus, summary)
 
     total_time_end = time.time()
     total_time = total_time_end - total_time_start
