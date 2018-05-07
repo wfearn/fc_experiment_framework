@@ -6,6 +6,7 @@ import scipy
 import os.path
 import pickle
 import time
+import os
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.linear_model import LogisticRegression
 import numpy as np
@@ -60,7 +61,9 @@ key_map['amazon_binary'] = binary_map
 
 LABEL_NAME = 'label'
 Z_ATTR = 'z'
-PICKLE_FILE = '/users/ugrad/w/wfearn/.ankura{}results.pickle'
+
+home_dir = os.path.join(os.path.join(os.getenv('HOME'), 'compute'), '.ankura')
+PICKLE_FILE = home_dir + '{}results.pickle'
 
 class identitydict(defaultdict):
     def __missing__(self, key):
@@ -220,8 +223,8 @@ def run_experiment(corpus_name, model, num_topics=100):
 
     return results
 
-def create_filtering_directory(filename, run_num, corpus_name):
-    return filename.format('/' + corpus_name + '/' + str(num_topics) + '/' + str(run_num))
+def create_filtering_directory(filename, run_num, corpus_name, model_name):
+    return filename.format('/' + corpus_name + '/' + model_name + '/' + str(num_topics) + '/' + str(run_num))
 
 if __name__ == "__main__":
 
@@ -235,7 +238,7 @@ if __name__ == "__main__":
     run_number = int(sys.argv[4])
     num_iterations = int(sys.argv[5])
 
-    PICKLE_FILE = create_filtering_directory(PICKLE_FILE, run_number, corpus_name)
+    PICKLE_FILE = create_filtering_directory(PICKLE_FILE, run_number, corpus_name, model)
 
     results = []
     for num in range(num_iterations):
