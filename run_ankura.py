@@ -7,13 +7,12 @@ import os.path
 import pickle
 import time
 import os
-from sklearn.linear_model import LogisticRegressionCV
 from sklearn.linear_model import LogisticRegression
 import numpy as np
 from collections import defaultdict
 
 q_map = {
-            'free' : ankura.anchor.build_labeled_cooccurrence,
+            'freederp' : ankura.anchor.build_labeled_cooccurrence,
             'supervised' : ankura.anchor.build_supervised_cooccurrence,
             'semi' : ankura.anchor.build_supervised_cooccurrence,
             'vanilla' : ankura.anchor.build_cooccurrence,
@@ -27,6 +26,7 @@ corpus_map = {
                 'toy' : ankura.corpus.toy,
                 'yelp' : ankura.corpus.yelp,
                 'amazon' : ankura.corpus.amazon,
+                'newsgroups' : ankura.corpus.newsgroups,
              }
 
 label_map = {
@@ -36,6 +36,8 @@ label_map = {
                 'yelp' : 'rating',
                 'amazon' : 'rating',
                 'yelp_binary' : 'binary_rating',
+                'tripadvisor_binary' : 'label',
+                'amazon_binary' : 'binary_rating',
             }
 
 newsgroup_map = {
@@ -57,7 +59,6 @@ binary_map = {
 
 key_map = defaultdict(lambda:identitydict(int))
 key_map['newsgroups'] = newsgroup_map
-key_map['amazon_binary'] = binary_map
 
 LABEL_NAME = 'label'
 Z_ATTR = 'z'
@@ -70,9 +71,15 @@ class identitydict(defaultdict):
         return key
 
 def get_logistic_regression_accuracy(train, test, train_target, test_target, topics):
-    ankura.topic.sampling_assign(train, topics, z_attr=Z_ATTR)
-    ankura.topic.sampling_assign(test, topics, z_attr=Z_ATTR)
 
+    assign_start = time.time()
+    ankura.topic.gensim_assign(train, topics, z_attr=Z_ATTR)
+    ankura.topic.gensim_assign(test, topics, z_attr=Z_ATTR)
+    assign_end = time.time()
+
+    assign_time = assign_end - assign_start
+
+    matrix_start = time.time()
     train_matrix = scipy.sparse.lil_matrix((len(train.documents), num_topics * len(train.vocabulary)))
     test_matrix = scipy.sparse.lil_matrix((len(test.documents), num_topics * len(test.vocabulary)))
 
@@ -84,8 +91,11 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
         for j, t in enumerate(doc.tokens):
             test_matrix[i, t[0] * num_topics + doc.metadata[Z_ATTR][j]] += 1
 
+    matrix_end = time.time()
+    matrix_time = matrix_end - matrix_start
+
     print('Running Logistic Regression...')
-    lr = LogisticRegression(penalty='l2', C=2.0)
+    lr = LogisticRegression()
 
     train_start = time.time()
     lr.fit(train_matrix, train_target)
@@ -105,7 +115,7 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
         if predictions[i] == test_target[i]:
             count += 1
 
-    return train_time, apply_time, (count / len(predictions))
+    return assign_time, matrix_time, train_time, apply_time, (count / len(predictions))
 
 def free_classifier_dream_accuracy(corpus, test, label, labeled_docs, topics, c, labels):
     classifier = ankura.topic.free_classifier_dream(corpus, label, labeled_docs=labeled_docs, topics=topics, C=c, labels=labels)
@@ -121,21 +131,21 @@ def free_classifier_dream_accuracy(corpus, test, label, labeled_docs, topics, c,
 
     apply_time = end - start
 
-    return 0, apply_time, contingency.accuracy()
+    return 0, 0, 0, apply_time, contingency.accuracy()
 
 def get_free_classifier_accuracy(test, topics, Q, labels, label):
-    classifier = ankura.topic.free_classifier(topics, Q, labels)
-    ankura.topic.variational_assign(test, topics, Z_ATTR)
+    classifier = ankura.topic.free_classifier_derpy(topics, Q, labels)
 
     print('Getting results from free classifier...')
     start = time.time()
+    ankura.topic.variational_assign(test, topics, Z_ATTR)
     contingency = ankura.validate.Contingency()
     for i, doc in enumerate(test.documents):
         contingency[doc.metadata[label], classifier(doc, Z_ATTR)] += 1
     end = time.time()
     apply_time = end - start
 
-    return 0, apply_time, contingency.accuracy()
+    return 0, 0, 0, apply_time, contingency.accuracy()
 
 def run_experiment(corpus_name, model, num_topics=100):
 
@@ -153,10 +163,9 @@ def run_experiment(corpus_name, model, num_topics=100):
     total_time_start = time.time()
 
     print('Splitting corpus into test and train...')
-    if model == 'semi' or model == 'free' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
-        corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
-        corpus = corpus[1]
-        train_corpus, dev_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True) # Do I care about the dev corpus?
+    if model == 'semi' or model == 'freederp' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
+        split_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
+        train_corpus, dev_corpus = ankura.pipeline.test_train_split(split_corpus[1], return_ids=True) # Do I care about the dev corpus?
     else:
         train_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
 
@@ -170,14 +179,14 @@ def run_experiment(corpus_name, model, num_topics=100):
 
     print('Calculating Q...')
     q_start = time.time()
-    if model == 'free' or model == 'fclr' or model == 'fcdr':
-        Q, labels = q_retriever(corpus, label_name, train_labeled_docs)
+    if model == 'freederp' or model == 'fclr' or model == 'fcdr':
+        Q, labels = q_retriever(split_corpus, label_name, train_labeled_docs)
     elif model == 'supervised':
         Q = q_retriever(train, label_name, train_labeled_docs)
     elif model == 'semi':
-        Q = q_retriever(corpus, label_name, train_labeled_docs)
+        Q = q_retriever(split_corpus, label_name, train_labeled_docs)
     else:
-        Q = q_retriever(corpus)
+        Q = q_retriever(split_corpus)
 
     q_end = time.time()
     q_time = q_end - q_start
@@ -196,12 +205,12 @@ def run_experiment(corpus_name, model, num_topics=100):
     topic_time = topic_end - topic_start
     
     print('Calculating accuracy...')
-    if model == 'free':
-        train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name)  
+    if model == 'freederp':
+        assign_time, matrix_time, train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name)  
     elif model == 'fcdr':
-        train_time, apply_time, accuracy = free_classifier_dream_accuracy(corpus, test, label_name, train_labeled_docs, topics, c, labels)
+        assign_time, matrix_time, train_time, apply_time, accuracy = free_classifier_dream_accuracy(split_corpus, test, label_name, train_labeled_docs, topics, c, labels)
     else:
-        train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics)
+        assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics)
     print('Accuracy is:', accuracy)
 
     summary = ankura.topic.topic_summary(topics)
@@ -220,6 +229,8 @@ def run_experiment(corpus_name, model, num_topics=100):
     results['total_time'] = float(total_time)
     results['train_time'] = float(train_time)
     results['apply_time'] = float(apply_time)
+    results['assign_time'] = float(assign_time)
+    results['matrix_time'] = float(matrix_time)
 
     return results
 
