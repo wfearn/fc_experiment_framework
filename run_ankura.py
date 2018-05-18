@@ -248,7 +248,7 @@ def create_filtering_directory(filename, run_num, corpus_name, model_name):
 
 if __name__ == "__main__":
 
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 6:
         print('Invalid number of arguments \n Command: python3 experiments.py <num_topics> <corpus_name> <model> <run_number> <num_iterations>')
         sys.exit()
 
