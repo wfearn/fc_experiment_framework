@@ -61,7 +61,7 @@ key_map = defaultdict(lambda:identitydict(int))
 key_map['newsgroups'] = newsgroup_map
 
 LABEL_NAME = 'label'
-Z_ATTR = 'z'
+THETA_ATTR = 'z'
 
 home_dir = os.path.join(os.path.join(os.getenv('HOME'), 'compute'), '.ankura')
 PICKLE_FILE = home_dir + '{}results.pickle'
@@ -73,8 +73,8 @@ class identitydict(defaultdict):
 def get_logistic_regression_accuracy(train, test, train_target, test_target, topics):
 
     assign_start = time.time()
-    ankura.topic.gensim_assign(train, topics, z_attr=Z_ATTR)
-    ankura.topic.gensim_assign(test, topics, z_attr=Z_ATTR)
+    ankura.topic.gensim_assign(train, topics, z_attr=THETA_ATTR) #Z attr is theta because I'm lazy
+    ankura.topic.gensim_assign(test, topics, z_attr=THETA_ATTR)
     assign_end = time.time()
 
     assign_time = assign_end - assign_start
@@ -85,11 +85,19 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
 
     for i, doc in enumerate(train.documents):
         for j, t in enumerate(doc.tokens):
-            train_matrix[i, t[0] * num_topics + doc.metadata[Z_ATTR][j]] += 1
+            train_matrix[i, t[0] * num_topics + doc.metadata[THETA_ATTR][j]] += 1
 
     for i, doc in enumerate(test.documents):
         for j, t in enumerate(doc.tokens):
-            test_matrix[i, t[0] * num_topics + doc.metadata[Z_ATTR][j]] += 1
+            test_matrix[i, t[0] * num_topics + doc.metadata[THETA_ATTR][j]] += 1
+
+    for i in range(train_matrix.shape[0]):
+        for j in range(train_matrix.shape[1]):
+            train_matrix[i, j] = np.log(train_matrix[i, j])
+
+    for i in range(test_matrix.shape[0]):
+        for j in range(test_matrix.shape[1]):
+            test_matrix[i, j] = np.log(test_matrix[i, j])
 
     matrix_end = time.time()
     matrix_time = matrix_end - matrix_start
@@ -138,16 +146,16 @@ def get_free_classifier_accuracy(test, topics, Q, labels, label):
 
     print('Getting results from free classifier...')
     start = time.time()
-    ankura.topic.variational_assign(test, topics, Z_ATTR)
+    ankura.topic.gensim_assign(test, topics, THETA_ATTR)
     contingency = ankura.validate.Contingency()
     for i, doc in enumerate(test.documents):
-        contingency[doc.metadata[label], classifier(doc, Z_ATTR)] += 1
+        contingency[doc.metadata[label], classifier(doc, THETA_ATTR)] += 1
     end = time.time()
     apply_time = end - start
 
     return 0, 0, 0, apply_time, contingency.accuracy()
 
-def run_experiment(corpus_name, model, num_topics=100):
+def run_experiment(corpus_name, model, seed, num_topics=100):
 
     doc_label_map = key_map[corpus_name]
     label_name = label_map[corpus_name]
@@ -164,10 +172,11 @@ def run_experiment(corpus_name, model, num_topics=100):
 
     print('Splitting corpus into test and train...')
     if model == 'semi' or model == 'freederp' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
-        split_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
-        train_corpus, dev_corpus = ankura.pipeline.test_train_split(split_corpus[1], return_ids=True) # Do I care about the dev corpus?
+        split_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, random_seed=seed, return_ids=True)
+        train_corpus, dev_corpus = ankura.pipeline.test_train_split(split_corpus[1], random_seed=seed, return_ids=True) # Do I care about the dev corpus?
+        split = split_corpus[1]
     else:
-        train_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, return_ids=True)
+        train_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, random_seed=seed, return_ids=True)
 
     train = train_corpus[1]
     train_labeled_docs = set(train_corpus[0])
@@ -180,13 +189,13 @@ def run_experiment(corpus_name, model, num_topics=100):
     print('Calculating Q...')
     q_start = time.time()
     if model == 'freederp' or model == 'fclr' or model == 'fcdr':
-        Q, labels = q_retriever(split_corpus, label_name, train_labeled_docs)
+        Q, labels = q_retriever(split, label_name, train_labeled_docs)
     elif model == 'supervised':
         Q = q_retriever(train, label_name, train_labeled_docs)
     elif model == 'semi':
-        Q = q_retriever(split_corpus, label_name, train_labeled_docs)
+        Q = q_retriever(split, label_name, train_labeled_docs)
     else:
-        Q = q_retriever(split_corpus)
+        Q = q_retriever(split)
 
     q_end = time.time()
     q_time = q_end - q_start
@@ -208,7 +217,7 @@ def run_experiment(corpus_name, model, num_topics=100):
     if model == 'freederp':
         assign_time, matrix_time, train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name)  
     elif model == 'fcdr':
-        assign_time, matrix_time, train_time, apply_time, accuracy = free_classifier_dream_accuracy(split_corpus, test, label_name, train_labeled_docs, topics, c, labels)
+        assign_time, matrix_time, train_time, apply_time, accuracy = free_classifier_dream_accuracy(split, test, label_name, train_labeled_docs, topics, c, labels)
     else:
         assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics)
     print('Accuracy is:', accuracy)
@@ -248,12 +257,13 @@ if __name__ == "__main__":
     model = str(sys.argv[3])
     run_number = int(sys.argv[4])
     num_iterations = int(sys.argv[5])
+    seed = int(sys.argv[6])
 
     PICKLE_FILE = create_filtering_directory(PICKLE_FILE, run_number, corpus_name, model)
 
     results = []
     for num in range(num_iterations):
-        results.append(run_experiment(corpus_name, model, num_topics))
+        results.append(run_experiment(corpus_name, model, num_topics, seed))
 
     print('Average Accuracy:', np.mean([float(result['accuracy']) for result in results]))
     print('Average Training Time:', np.mean([float(result['train_time']) for result in results]))
