@@ -106,10 +106,20 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
         test_matrix = np.zeros((len(test.documents), num_topics))
 
         for i, doc in enumerate(train.documents):
-            train_matrix[i, :] = np.log(train.documents[i].metadata[label])
+            row_feature = list()
+            for theta_j in train.documents[i].metadata[THETA_ATTR]:
+                if theta_j: row_feature.append(theta_j)
+                else: row_feature.append(0)
+
+            train_matrix[i, :] =  row_feature
 
         for i, doc in enumerate(test.documents):
-            test_matrix[i, :] = np.log(test.documents[i].metadata[label])
+            row_feature = list()
+            for theta_j in test.documents[i].metadata[THETA_ATTR]:
+                if theta_j: row_feature.append(theta_j)
+                else: row_feature.append(0)
+
+            test_matrix[i, :] =  row_feature
 
         matrix_end = time.time()
         matrix_time = matrix_end - matrix_start
@@ -170,6 +180,8 @@ def run_experiment(corpus_name, model, num_topics, seed):
     doc_label_map = key_map[corpus_name]
     label_name = label_map[corpus_name]
     if 'binary' in corpus_name: corpus_name = corpus_name.split('_')[0]
+
+    wt_pairs = False
     if 'wt' in model:
         wt_pairs = True
         model = model.split('_')[0]
@@ -204,7 +216,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
     if model == 'freederp' or model == 'fclr' or model == 'fcdr':
         Q, labels = q_retriever(split, label_name, train_labeled_docs)
     elif model == 'supervised':
-        Q = q_retriever(train, label_name, train_labeled_docs)
+        Q = q_retriever(train, label_name, range(len(train.documents)))
     elif model == 'semi':
         Q = q_retriever(split, label_name, train_labeled_docs)
     else:
@@ -287,6 +299,9 @@ if __name__ == "__main__":
 
     print('Average Accuracy:', np.mean([float(result['accuracy']) for result in results]))
     print('Average Training Time:', np.mean([float(result['train_time']) for result in results]))
+    print('Average Total Time:', np.mean([float(result['total_time']) for result in results]))
+    print('Average Train Time:', np.mean([float(result['train_time']) for result in results]))
+    print('Average Apply Time:', np.mean([float(result['apply_time']) for result in results]))
     print(results)
     pickle_directory = os.path.dirname(PICKLE_FILE)
 
