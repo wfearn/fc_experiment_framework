@@ -68,39 +68,54 @@ class identitydict(defaultdict):
     def __missing__(self, key):
         return key
 
-def get_logistic_regression_accuracy(train, test, train_target, test_target, topics):
+def get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label, wordtopic_pairs=False):
 
-    assign_start = time.time()
-    ankura.topic.gensim_assign(train, topics, z_attr=THETA_ATTR) #Z attr is theta because I'm lazy
-    ankura.topic.gensim_assign(test, topics, z_attr=THETA_ATTR)
-    assign_end = time.time()
+    if wordtopic_pairs:
+        assign_start = time.time()
+        ankura.topic.gensim_assign(train, topics, z_attr=THETA_ATTR) #Z attr is theta because I'm lazy
+        ankura.topic.gensim_assign(test, topics, z_attr=THETA_ATTR)
+        assign_end = time.time()
 
-    assign_time = assign_end - assign_start
+        assign_time = assign_end - assign_start
 
-    matrix_start = time.time()
-    train_matrix = scipy.sparse.lil_matrix((len(train.documents), num_topics * len(train.vocabulary)))
-    test_matrix = scipy.sparse.lil_matrix((len(test.documents), num_topics * len(test.vocabulary)))
+        matrix_start = time.time()
+        train_matrix = scipy.sparse.lil_matrix((len(train.documents), num_topics * len(train.vocabulary)))
+        test_matrix = scipy.sparse.lil_matrix((len(test.documents), num_topics * len(test.vocabulary)))
 
-    for i, doc in enumerate(train.documents):
-        for j, t in enumerate(doc.tokens):
-            train_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
+        for i, doc in enumerate(train.documents):
+            for j, t in enumerate(doc.tokens):
+                train_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
 
-    for i, doc in enumerate(test.documents):
-        for j, t in enumerate(doc.tokens):
-            test_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
+        for i, doc in enumerate(test.documents):
+            for j, t in enumerate(doc.tokens):
+                test_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
 
-    for i in range(train_matrix.shape[0]):
-        for j in range(train_matrix.shape[1]):
-            train_matrix[i, j] = np.log(train_matrix[i, j])
+        matrix_end = time.time()
+        matrix_time = matrix_end - matrix_start
 
-    for i in range(test_matrix.shape[0]):
-        for j in range(test_matrix.shape[1]):
-            test_matrix[i, j] = np.log(test_matrix[i, j])
+    else:
+        assign_start = time.time()
+        ankura.topic.gensim_assign(train, topics, theta_attr=THETA_ATTR)
+        ankura.topic.gensim_assign(test, topics, theta_attr=THETA_ATTR)
+        assign_end = time.time()
 
-    matrix_end = time.time()
-    matrix_time = matrix_end - matrix_start
+        assign_time = assign_end - assign_start
+
+        matrix_start = time.time()
+        train_matrix = np.zeros((len(train.documents), num_topics))
+        test_matrix = np.zeros((len(test.documents), num_topics))
+
+        for i, doc in enumerate(train.documents):
+            train_matrix[i, :] = np.log(train.documents[i].metadata[label])
+
+        for i, doc in enumerate(test.documents):
+            test_matrix[i, :] = np.log(test.documents[i].metadata[label])
+
+        matrix_end = time.time()
+        matrix_time = matrix_end - matrix_start
 
     print('Running Logistic Regression...')
+    sys.stdout.flush()
     lr = LogisticRegression()
 
     train_start = time.time()
@@ -110,18 +125,12 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
     train_time = train_end - train_start
 
     apply_start = time.time()
-    predictions = lr.predict(test_matrix)
+    accuracy = lr.score(test_matrix, test_target)
     apply_end = time.time()
 
     apply_time = apply_end - apply_start
 
-    count = 0
-
-    for i in range(len(predictions)):
-        if predictions[i] == test_target[i]:
-            count += 1
-
-    return assign_time, matrix_time, train_time, apply_time, (count / len(predictions))
+    return assign_time, matrix_time, train_time, apply_time, accuracy
 
 def free_classifier_dream_accuracy(corpus, test, label, labeled_docs, topics, c, labels):
     classifier = ankura.topic.free_classifier_dream(corpus, label, labeled_docs=labeled_docs, topics=topics, C=c, labels=labels)
@@ -143,6 +152,7 @@ def get_free_classifier_accuracy(test, topics, Q, labels, label):
     classifier = ankura.topic.free_classifier_derpy(topics, Q, labels)
 
     print('Getting results from free classifier...')
+    sys.stdout.flush()
     start = time.time()
     ankura.topic.gensim_assign(test, topics, THETA_ATTR)
     contingency = ankura.validate.Contingency()
@@ -160,14 +170,19 @@ def run_experiment(corpus_name, model, num_topics, seed):
     doc_label_map = key_map[corpus_name]
     label_name = label_map[corpus_name]
     if 'binary' in corpus_name: corpus_name = corpus_name.split('_')[0]
+    if 'wt' in model:
+        wt_pairs = True
+        model = model.split('_')[0]
 
     corpus_retriever = corpus_map[corpus_name]
     q_retriever = q_map[model]
 
     print('Retrieving corpus...')
+    sys.stdout.flush()
     corpus = corpus_retriever()
 
     print('Splitting corpus into test and train...')
+    sys.stdout.flush()
     if model == 'semi' or model == 'freederp' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
         split_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, random_seed=seed, return_ids=True)
         train_corpus, dev_corpus = ankura.pipeline.train_test_split(split_corpus[1], random_seed=seed, return_ids=True, remove_testonly_words=False) # Do I care about the dev corpus?
@@ -184,6 +199,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
     test_target = [doc_label_map[doc.metadata[label_name]] for doc in test.documents]
 
     print('Calculating Q...')
+    sys.stdout.flush()
     q_start = time.time()
     if model == 'freederp' or model == 'fclr' or model == 'fcdr':
         Q, labels = q_retriever(split, label_name, train_labeled_docs)
@@ -198,12 +214,14 @@ def run_experiment(corpus_name, model, num_topics, seed):
     q_time = q_end - q_start
 
     print('Retrieving anchors...')
+    sys.stdout.flush()
     anchor_start = time.time()
     anchors = ankura.anchor.gram_schmidt_anchors(train, Q, num_topics)
     anchor_end = time.time()
     anchor_time = anchor_end - anchor_start
 
     print('Retrieving topics...')
+    sys.stdout.flush()
     topic_start = time.time()
     c, topics = ankura.anchor.recover_topics(Q, anchors, 1e-5, get_c=True)
     topic_end = time.time()
@@ -211,13 +229,15 @@ def run_experiment(corpus_name, model, num_topics, seed):
     topic_time = topic_end - topic_start
     
     print('Calculating accuracy...')
+    sys.stdout.flush()
     if model == 'freederp':
         assign_time, matrix_time, train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name)  
     elif model == 'fcdr':
         assign_time, matrix_time, train_time, apply_time, accuracy = free_classifier_dream_accuracy(split, test, label_name, train_labeled_docs, topics, c, labels)
     else:
-        assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics)
+        assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label_name, wordtopic_pairs=wt_pairs)
     print('Accuracy is:', accuracy)
+    sys.stdout.flush()
 
     summary = ankura.topic.topic_summary(topics)
     coherence = ankura.validate.coherence(corpus, summary)
@@ -237,6 +257,9 @@ def run_experiment(corpus_name, model, num_topics, seed):
     results['apply_time'] = float(apply_time)
     results['assign_time'] = float(assign_time)
     results['matrix_time'] = float(matrix_time)
+    results['num_topics'] = num_topics
+    results['seed'] = seed
+    results['corpus'] = corpus_name
 
     return results
 
