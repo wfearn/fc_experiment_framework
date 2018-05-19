@@ -172,11 +172,11 @@ def run_experiment(corpus_name, model, seed, num_topics=100):
 
     print('Splitting corpus into test and train...')
     if model == 'semi' or model == 'freederp' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
-        split_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, random_seed=seed, return_ids=True)
-        train_corpus, dev_corpus = ankura.pipeline.test_train_split(split_corpus[1], random_seed=seed, return_ids=True) # Do I care about the dev corpus?
+        split_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, random_seed=seed, return_ids=True)
+        train_corpus, dev_corpus = ankura.pipeline.train_test_split(split_corpus[1], random_seed=seed, return_ids=True, remove_testonly_words=False) # Do I care about the dev corpus?
         split = split_corpus[1]
     else:
-        train_corpus, test_corpus = ankura.pipeline.test_train_split(corpus, random_seed=seed, return_ids=True)
+        train_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, random_seed=seed, return_ids=True)
 
     train = train_corpus[1]
     train_labeled_docs = set(train_corpus[0])
