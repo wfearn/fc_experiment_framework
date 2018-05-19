@@ -239,11 +239,11 @@ def run_experiment(corpus_name, model, num_topics, seed):
     print('Accuracy is:', accuracy)
     sys.stdout.flush()
 
-    summary = ankura.topic.topic_summary(topics)
-    coherence = ankura.validate.coherence(corpus, summary)
-
     total_time_end = time.time()
     total_time = total_time_end - total_time_start
+
+    summary = ankura.topic.topic_summary(topics)
+    coherence = ankura.validate.coherence(corpus, summary)
 
     results = {}
     results['accuracy'] = accuracy
