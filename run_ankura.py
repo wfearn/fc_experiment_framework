@@ -50,20 +50,18 @@ newsgroup_map = {
                 }
 
 binary_map = {
-                5.0 : 5.0,
-                4.0 : 0.0,
-                3.0 : 0.0,
-                2.0 : 0.0,
-                1.0 : 0.0,
+                True : 1,
+                False : 0,
              }
 
 key_map = defaultdict(lambda:identitydict(int))
 key_map['newsgroups'] = newsgroup_map
+key_map['amazon'] = binary_map
 
 LABEL_NAME = 'label'
 THETA_ATTR = 'z'
 
-home_dir = os.path.join(os.path.join(os.getenv('HOME'), 'compute'), '.ankura')
+home_dir = os.path.join(os.getenv('HOME'), '.ankura')
 PICKLE_FILE = home_dir + '{}results.pickle'
 
 class identitydict(defaultdict):
@@ -85,11 +83,11 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
 
     for i, doc in enumerate(train.documents):
         for j, t in enumerate(doc.tokens):
-            train_matrix[i, t[0] * num_topics + doc.metadata[THETA_ATTR][j]] += 1
+            train_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
 
     for i, doc in enumerate(test.documents):
         for j, t in enumerate(doc.tokens):
-            test_matrix[i, t[0] * num_topics + doc.metadata[THETA_ATTR][j]] += 1
+            test_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
 
     for i in range(train_matrix.shape[0]):
         for j in range(train_matrix.shape[1]):
@@ -155,7 +153,9 @@ def get_free_classifier_accuracy(test, topics, Q, labels, label):
 
     return 0, 0, 0, apply_time, contingency.accuracy()
 
-def run_experiment(corpus_name, model, seed, num_topics=100):
+def run_experiment(corpus_name, model, num_topics, seed):
+
+    total_time_start = time.time()
 
     doc_label_map = key_map[corpus_name]
     label_name = label_map[corpus_name]
@@ -164,11 +164,8 @@ def run_experiment(corpus_name, model, seed, num_topics=100):
     corpus_retriever = corpus_map[corpus_name]
     q_retriever = q_map[model]
 
-
     print('Retrieving corpus...')
     corpus = corpus_retriever()
-
-    total_time_start = time.time()
 
     print('Splitting corpus into test and train...')
     if model == 'semi' or model == 'freederp' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
