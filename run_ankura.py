@@ -56,7 +56,8 @@ binary_map = {
 
 key_map = defaultdict(lambda:identitydict(int))
 key_map['newsgroups'] = newsgroup_map
-key_map['amazon'] = binary_map
+key_map['amazon_binary'] = binary_map
+key_map['yelp_binary'] = binary_map
 
 LABEL_NAME = 'label'
 THETA_ATTR = 'z'
@@ -72,7 +73,7 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
 
     if wordtopic_pairs:
         assign_start = time.time()
-        ankura.topic.gensim_assign(train, topics, z_attr=THETA_ATTR) #Z attr is theta because I'm lazy
+        ankura.topic.gensim_assign(train, topics, z_attr=THETA_ATTR)
         ankura.topic.gensim_assign(test, topics, z_attr=THETA_ATTR)
         assign_end = time.time()
 
@@ -106,20 +107,10 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
         test_matrix = np.zeros((len(test.documents), num_topics))
 
         for i, doc in enumerate(train.documents):
-            row_feature = list()
-            for theta_j in train.documents[i].metadata[THETA_ATTR]:
-                if theta_j: row_feature.append(theta_j)
-                else: row_feature.append(0)
-
-            train_matrix[i, :] =  row_feature
+            train_matrix[i, :] = np.log(train.documents[i].metadata[THETA_ATTR] + 1e-30)
 
         for i, doc in enumerate(test.documents):
-            row_feature = list()
-            for theta_j in test.documents[i].metadata[THETA_ATTR]:
-                if theta_j: row_feature.append(theta_j)
-                else: row_feature.append(0)
-
-            test_matrix[i, :] =  row_feature
+            test_matrix[i, :] = np.log(test.documents[i].metadata[THETA_ATTR] + 1e-30)
 
         matrix_end = time.time()
         matrix_time = matrix_end - matrix_start
@@ -216,7 +207,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
     if model == 'freederp' or model == 'fclr' or model == 'fcdr':
         Q, labels = q_retriever(split, label_name, train_labeled_docs)
     elif model == 'supervised':
-        Q = q_retriever(train, label_name, range(len(train.documents)))
+        Q = q_retriever(train, label_name, set(range(len(train.documents))))
     elif model == 'semi':
         Q = q_retriever(split, label_name, train_labeled_docs)
     else:
@@ -272,6 +263,8 @@ def run_experiment(corpus_name, model, num_topics, seed):
     results['num_topics'] = num_topics
     results['seed'] = seed
     results['corpus'] = corpus_name
+    results['train_size'] = len(train.documents)
+    results['test_size'] = len(test.documents)
 
     return results
 
