@@ -62,7 +62,7 @@ key_map['yelp_binary'] = binary_map
 LABEL_NAME = 'label'
 THETA_ATTR = 'z'
 
-home_dir = os.path.join(os.getenv('HOME'), '.ankura')
+home_dir = os.path.join(os.path.join(os.getenv('HOME'), 'compute'), '.ankura')
 PICKLE_FILE = home_dir + '{}results.pickle'
 
 class identitydict(defaultdict):
@@ -218,6 +218,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
 
     print('Retrieving anchors...')
     sys.stdout.flush()
+
     anchor_start = time.time()
     anchors = ankura.anchor.gram_schmidt_anchors(train, Q, num_topics)
     anchor_end = time.time()
@@ -225,6 +226,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
 
     print('Retrieving topics...')
     sys.stdout.flush()
+
     topic_start = time.time()
     c, topics = ankura.anchor.recover_topics(Q, anchors, 1e-5, get_c=True)
     topic_end = time.time()
@@ -233,12 +235,14 @@ def run_experiment(corpus_name, model, num_topics, seed):
     
     print('Calculating accuracy...')
     sys.stdout.flush()
+
     if model == 'freederp':
         assign_time, matrix_time, train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name)  
     elif model == 'fcdr':
         assign_time, matrix_time, train_time, apply_time, accuracy = free_classifier_dream_accuracy(split, test, label_name, train_labeled_docs, topics, c, labels)
     else:
         assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label_name, wordtopic_pairs=wt_pairs)
+
     print('Accuracy is:', accuracy)
     sys.stdout.flush()
 
