@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import sys
+import signal
 import ankura
 import scipy
 import os.path
@@ -27,6 +28,8 @@ corpus_map = {
                 'yelp' : ankura.corpus.yelp,
                 'amazon' : ankura.corpus.amazon,
                 'newsgroups' : ankura.corpus.newsgroups,
+                'ammod' : ankura.corpus.amazon_modified,
+                'amlrg' : ankura.corpus.amazon_large,
              }
 
 label_map = {
@@ -38,6 +41,8 @@ label_map = {
                 'yelp_binary' : 'binary_rating',
                 'tripadvisor_binary' : 'label',
                 'amazon_binary' : 'binary_rating',
+                'ammod' : 'label',
+                'amlrg' : 'label',
             }
 
 newsgroup_map = {
@@ -54,10 +59,20 @@ binary_map = {
                 False : 0,
              }
 
+float_binary_map = {
+                        1.0 : 0.0,
+                        2.0 : 0.0,
+                        3.0 : 0.0,
+                        4.0 : 0.0,
+                        5.0 : 1.0,
+                   }
+
 key_map = defaultdict(lambda:identitydict(int))
 key_map['newsgroups'] = newsgroup_map
 key_map['amazon_binary'] = binary_map
 key_map['yelp_binary'] = binary_map
+key_map['ammod'] = float_binary_map
+key_map['amlrg'] = float_binary_map
 
 LABEL_NAME = 'label'
 THETA_ATTR = 'z'
@@ -69,51 +84,27 @@ class identitydict(defaultdict):
     def __missing__(self, key):
         return key
 
-def get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label, wordtopic_pairs=False):
+def get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label):
 
-    if wordtopic_pairs:
-        assign_start = time.time()
-        ankura.topic.gensim_assign(train, topics, z_attr=THETA_ATTR)
-        ankura.topic.gensim_assign(test, topics, z_attr=THETA_ATTR)
-        assign_end = time.time()
+    assign_start = time.time()
+    ankura.topic.gensim_assign(train, topics, theta_attr=THETA_ATTR)
+    ankura.topic.gensim_assign(test, topics, theta_attr=THETA_ATTR)
+    assign_end = time.time()
 
-        assign_time = assign_end - assign_start
+    assign_time = assign_end - assign_start
 
-        matrix_start = time.time()
-        train_matrix = scipy.sparse.lil_matrix((len(train.documents), num_topics * len(train.vocabulary)))
-        test_matrix = scipy.sparse.lil_matrix((len(test.documents), num_topics * len(test.vocabulary)))
+    matrix_start = time.time()
+    train_matrix = np.zeros((len(train.documents), num_topics))
+    test_matrix = np.zeros((len(test.documents), num_topics))
 
-        for i, doc in enumerate(train.documents):
-            for j, t in enumerate(doc.tokens):
-                train_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
+    for i, doc in enumerate(train.documents):
+        train_matrix[i, :] = np.log(train.documents[i].metadata[THETA_ATTR] + 1e-30)
 
-        for i, doc in enumerate(test.documents):
-            for j, t in enumerate(doc.tokens):
-                test_matrix[i, t.token * num_topics + doc.metadata[THETA_ATTR][j]] += 1
+    for i, doc in enumerate(test.documents):
+        test_matrix[i, :] = np.log(test.documents[i].metadata[THETA_ATTR] + 1e-30)
 
-        matrix_end = time.time()
-        matrix_time = matrix_end - matrix_start
-
-    else:
-        assign_start = time.time()
-        ankura.topic.gensim_assign(train, topics, theta_attr=THETA_ATTR)
-        ankura.topic.gensim_assign(test, topics, theta_attr=THETA_ATTR)
-        assign_end = time.time()
-
-        assign_time = assign_end - assign_start
-
-        matrix_start = time.time()
-        train_matrix = np.zeros((len(train.documents), num_topics))
-        test_matrix = np.zeros((len(test.documents), num_topics))
-
-        for i, doc in enumerate(train.documents):
-            train_matrix[i, :] = np.log(train.documents[i].metadata[THETA_ATTR] + 1e-30)
-
-        for i, doc in enumerate(test.documents):
-            test_matrix[i, :] = np.log(test.documents[i].metadata[THETA_ATTR] + 1e-30)
-
-        matrix_end = time.time()
-        matrix_time = matrix_end - matrix_start
+    matrix_end = time.time()
+    matrix_time = matrix_end - matrix_start
 
     print('Running Logistic Regression...')
     sys.stdout.flush()
@@ -164,25 +155,21 @@ def get_free_classifier_accuracy(test, topics, Q, labels, label):
 
     return 0, 0, 0, apply_time, contingency.accuracy()
 
-def run_experiment(corpus_name, model, num_topics, seed):
+def run_experiment(corpus_name='yelp', model='supervised', num_topics=80, seed=4078, vocab_size=3000, run_number=97):
 
     total_time_start = time.time()
 
     doc_label_map = key_map[corpus_name]
     label_name = label_map[corpus_name]
-    if 'binary' in corpus_name: corpus_name = corpus_name.split('_')[0]
-
-    wt_pairs = False
-    if 'wt' in model:
-        wt_pairs = True
-        model = model.split('_')[0]
 
     corpus_retriever = corpus_map[corpus_name]
     q_retriever = q_map[model]
 
     print('Retrieving corpus...')
     sys.stdout.flush()
-    corpus = corpus_retriever()
+    corpus_path, docs_path, corpus = corpus_retriever(run_number=run_number, vocab_size=vocab_size)
+    print('Corpus Path:', corpus_path)
+    print('Docs Path:', docs_path)
 
     print('Splitting corpus into test and train...')
     sys.stdout.flush()
@@ -191,7 +178,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
         train_corpus, dev_corpus = ankura.pipeline.train_test_split(split_corpus[1], random_seed=seed, return_ids=True, remove_testonly_words=False) # Do I care about the dev corpus?
         split = split_corpus[1]
     else:
-        train_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, random_seed=seed, return_ids=True)
+        train_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, num_train=100000, num_test=5000, random_seed=seed, return_ids=True)
 
     train = train_corpus[1]
     train_labeled_docs = set(train_corpus[0])
@@ -204,6 +191,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
     print('Calculating Q...')
     sys.stdout.flush()
     q_start = time.time()
+
     if model == 'freederp' or model == 'fclr' or model == 'fcdr':
         Q, labels = q_retriever(split, label_name, train_labeled_docs)
     elif model == 'supervised':
@@ -241,7 +229,7 @@ def run_experiment(corpus_name, model, num_topics, seed):
     elif model == 'fcdr':
         assign_time, matrix_time, train_time, apply_time, accuracy = free_classifier_dream_accuracy(split, test, label_name, train_labeled_docs, topics, c, labels)
     else:
-        assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label_name, wordtopic_pairs=wt_pairs)
+        assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label_name)
 
     print('Accuracy is:', accuracy)
     sys.stdout.flush()
@@ -270,10 +258,19 @@ def run_experiment(corpus_name, model, num_topics, seed):
     results['train_size'] = len(train.documents)
     results['test_size'] = len(test.documents)
 
+    os.remove(docs_path)
+    os.remove(corpus_path)
+
     return results
 
 def create_filtering_directory(filename, run_num, corpus_name, model_name):
     return filename.format('/' + corpus_name + '/' + model_name + '/' + str(num_topics) + '/' + str(run_num))
+
+def sigterm_handler(signum, stack_frame):
+    os.remove(docs_path)
+    os.remove(corpus_path)
+
+    sys.exit(0)
 
 if __name__ == "__main__":
 
@@ -287,12 +284,24 @@ if __name__ == "__main__":
     run_number = int(sys.argv[4])
     num_iterations = int(sys.argv[5])
     seed = int(sys.argv[6])
+    vocab_size = int(sys.argv[7])
+
+    print('Topics:', num_topics)
+    print('Corpus:', corpus_name)
+    print('Model:', model)
+    print('Run Num:', run_number)
+    print('Num Iterations:', num_iterations)
+    print('Seed:', seed)
+    print('Vocabulary Size:', vocab_size)
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
 
     PICKLE_FILE = create_filtering_directory(PICKLE_FILE, run_number, corpus_name, model)
+    print('Pickle File:', PICKLE_FILE)
 
     results = []
     for num in range(num_iterations):
-        results.append(run_experiment(corpus_name, model, num_topics, seed))
+        results.append(run_experiment(corpus_name=corpus_name, model=model, num_topics=num_topics, vocab_size=vocab_size, run_number=run_number))
 
     print('Average Accuracy:', np.mean([float(result['accuracy']) for result in results]))
     print('Average Training Time:', np.mean([float(result['train_time']) for result in results]))
