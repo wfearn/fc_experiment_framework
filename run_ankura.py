@@ -77,8 +77,9 @@ key_map['amlrg'] = float_binary_map
 LABEL_NAME = 'label'
 THETA_ATTR = 'z'
 
-home_dir = os.path.join(os.path.join(os.getenv('HOME'), 'compute'), '.ankura')
-PICKLE_FILE = home_dir + '{}results.pickle'
+HOMEDIR = os.path.join(os.getenv('HOME'), '.ankura')
+PICKLE_FILE = f'{HOMEDIR}{{}}results.pickle'
+LOCALDIR = '/local/amazon_large'
 
 class identitydict(defaultdict):
     def __missing__(self, key):
@@ -87,8 +88,8 @@ class identitydict(defaultdict):
 def get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label):
 
     assign_start = time.time()
-    ankura.topic.gensim_assign(train, topics, theta_attr=THETA_ATTR)
-    ankura.topic.gensim_assign(test, topics, theta_attr=THETA_ATTR)
+    train_thetas = ankura.topic.gensim_assign(train, topics, theta_attr=THETA_ATTR)
+    test_thetas = ankura.topic.gensim_assign(test, topics, theta_attr=THETA_ATTR)
     assign_end = time.time()
 
     assign_time = assign_end - assign_start
@@ -97,11 +98,14 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
     train_matrix = np.zeros((len(train.documents), num_topics))
     test_matrix = np.zeros((len(test.documents), num_topics))
 
+    def log_doc_topic(i, thetas):
+        return np.log(thetas[i] + 1e-30)
+
     for i, doc in enumerate(train.documents):
-        train_matrix[i, :] = np.log(train.documents[i].metadata[THETA_ATTR] + 1e-30)
+        train_matrix[i, :] = log_doc_topic(i, train_thetas)
 
     for i, doc in enumerate(test.documents):
-        test_matrix[i, :] = np.log(test.documents[i].metadata[THETA_ATTR] + 1e-30)
+        test_matrix[i, :] = log_doc_topic(i, test_thetas)
 
     matrix_end = time.time()
     matrix_time = matrix_end - matrix_start
@@ -124,38 +128,8 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
 
     return assign_time, matrix_time, train_time, apply_time, accuracy
 
-def free_classifier_dream_accuracy(corpus, test, label, labeled_docs, topics, c, labels):
-    classifier = ankura.topic.free_classifier_dream(corpus, label, labeled_docs=labeled_docs, topics=topics, C=c, labels=labels)
 
-    contingency = ankura.validate.Contingency()
-
-    start = time.time()
-    for doc in test.documents:
-        gold = doc.metadata[label]
-        pred = classifier(doc)
-        contingency[gold, pred] += 1
-    end = time.time()
-
-    apply_time = end - start
-
-    return 0, 0, 0, apply_time, contingency.accuracy()
-
-def get_free_classifier_accuracy(test, topics, Q, labels, label):
-    classifier = ankura.topic.free_classifier_derpy(topics, Q, labels)
-
-    print('Getting results from free classifier...')
-    sys.stdout.flush()
-    start = time.time()
-    ankura.topic.gensim_assign(test, topics, THETA_ATTR)
-    contingency = ankura.validate.Contingency()
-    for i, doc in enumerate(test.documents):
-        contingency[doc.metadata[label], classifier(doc, THETA_ATTR)] += 1
-    end = time.time()
-    apply_time = end - start
-
-    return 0, 0, 0, apply_time, contingency.accuracy()
-
-def run_experiment(corpus_name='yelp', model='supervised', num_topics=80, seed=4078, vocab_size=3000, run_number=97):
+def run_experiment(corpus_name='amlrg', model='semi', num_topics=80, seed=None, vocab_size=3000, run_number=97):
 
     total_time_start = time.time()
 
@@ -167,23 +141,24 @@ def run_experiment(corpus_name='yelp', model='supervised', num_topics=80, seed=4
 
     print('Retrieving corpus...')
     sys.stdout.flush()
-    corpus_path, docs_path, corpus = corpus_retriever(run_number=run_number, vocab_size=vocab_size)
+    docs_path, corpus_path, corpus = corpus_retriever(hash_size=vocab_size)
+
     print('Corpus Path:', corpus_path)
     print('Docs Path:', docs_path)
-
+    print('Vocabulary:', len(corpus.vocabulary))
     print('Splitting corpus into test and train...')
     sys.stdout.flush()
-    if model == 'semi' or model == 'freederp' or model == 'fclr' or model == 'fcdr': # Is there a better way to do this?
-        split_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, random_seed=seed, return_ids=True)
-        train_corpus, dev_corpus = ankura.pipeline.train_test_split(split_corpus[1], random_seed=seed, return_ids=True, remove_testonly_words=False) # Do I care about the dev corpus?
-        split = split_corpus[1]
-    else:
-        train_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, num_train=100000, num_test=5000, random_seed=seed, return_ids=True)
 
+
+    split_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, random_seed=seed, return_ids=True, save_dir=LOCALDIR, vocab_size=vocab_size, train_name='split')
+
+    train_corpus, dev_corpus = ankura.pipeline.train_test_split(split_corpus[1], random_seed=seed, return_ids=True, save_dir=LOCALDIR, vocab_size=vocab_size, test_name='dev')
+
+    split = split_corpus[1]
     train = train_corpus[1]
-    train_labeled_docs = set(train_corpus[0])
-
     test = test_corpus[1]
+    split_ids = split_corpus[0]
+    train_labeled_docs = set([split_ids[i] for i in train_corpus[0]])
 
     train_target = [doc_label_map[doc.metadata[label_name]] for doc in train.documents]
     test_target = [doc_label_map[doc.metadata[label_name]] for doc in test.documents]
@@ -191,16 +166,7 @@ def run_experiment(corpus_name='yelp', model='supervised', num_topics=80, seed=4
     print('Calculating Q...')
     sys.stdout.flush()
     q_start = time.time()
-
-    if model == 'freederp' or model == 'fclr' or model == 'fcdr':
-        Q, labels = q_retriever(split, label_name, train_labeled_docs)
-    elif model == 'supervised':
-        Q = q_retriever(train, label_name, set(range(len(train.documents))))
-    elif model == 'semi':
-        Q = q_retriever(split, label_name, train_labeled_docs)
-    else:
-        Q = q_retriever(split)
-
+    Q = q_retriever(split, label_name, train_labeled_docs)
     q_end = time.time()
     q_time = q_end - q_start
 
@@ -218,18 +184,13 @@ def run_experiment(corpus_name='yelp', model='supervised', num_topics=80, seed=4
     topic_start = time.time()
     c, topics = ankura.anchor.recover_topics(Q, anchors, 1e-5, get_c=True)
     topic_end = time.time()
-    
+
     topic_time = topic_end - topic_start
-    
+
     print('Calculating accuracy...')
     sys.stdout.flush()
 
-    if model == 'freederp':
-        assign_time, matrix_time, train_time, apply_time, accuracy = get_free_classifier_accuracy(test, topics, Q, labels, label_name)  
-    elif model == 'fcdr':
-        assign_time, matrix_time, train_time, apply_time, accuracy = free_classifier_dream_accuracy(split, test, label_name, train_labeled_docs, topics, c, labels)
-    else:
-        assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label_name)
+    assign_time, matrix_time, train_time, apply_time, accuracy = get_logistic_regression_accuracy(train, test, train_target, test_target, topics, label_name)
 
     print('Accuracy is:', accuracy)
     sys.stdout.flush()
@@ -283,8 +244,8 @@ if __name__ == "__main__":
     model = str(sys.argv[3])
     run_number = int(sys.argv[4])
     num_iterations = int(sys.argv[5])
-    seed = int(sys.argv[6])
-    vocab_size = int(sys.argv[7])
+    vocab_size = int(sys.argv[6])
+    seed = int(sys.argv[7]) if len(sys.argv) > 7 else None
 
     print('Topics:', num_topics)
     print('Corpus:', corpus_name)
