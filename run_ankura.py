@@ -8,9 +8,12 @@ import os.path
 import pickle
 import time
 import os
+import psutil
 from sklearn.linear_model import LogisticRegression
 import numpy as np
 from collections import defaultdict
+
+BYTES_TO_GIG = 1000000000
 
 q_map = {
             'freederp' : ankura.anchor.build_labeled_cooccurrence,
@@ -92,11 +95,21 @@ def get_logistic_regression_accuracy(train, test, train_target, test_target, top
     test_thetas = ankura.topic.gensim_assign(test, topics, theta_attr=THETA_ATTR)
     assign_end = time.time()
 
+    mem = psutil.Process().memory_info()
+    res = mem.rss/BYTES_TO_GIG
+    vir = mem.vms/BYTES_TO_GIG
+    print(f'After retrieving thetas: Resident Set: {res}, Virtual Set: {vir}')
+
     assign_time = assign_end - assign_start
 
     matrix_start = time.time()
     train_matrix = np.zeros((len(train.documents), num_topics))
     test_matrix = np.zeros((len(test.documents), num_topics))
+
+    mem = psutil.Process().memory_info()
+    res = mem.rss/BYTES_TO_GIG
+    vir = mem.vms/BYTES_TO_GIG
+    print(f'After building matrices: Resident Set: {res}, Virtual Set: {vir}')
 
     def log_doc_topic(i, thetas):
         return np.log(thetas[i] + 1e-30)
@@ -152,7 +165,7 @@ def run_experiment(corpus_name='amlrg', model='semi', num_topics=80, seed=None, 
 
     split_corpus, test_corpus = ankura.pipeline.train_test_split(corpus, random_seed=seed, return_ids=True, save_dir=LOCALDIR, vocab_size=vocab_size, train_name='split')
 
-    train_corpus, dev_corpus = ankura.pipeline.train_test_split(split_corpus[1], random_seed=seed, return_ids=True, save_dir=LOCALDIR, vocab_size=vocab_size, test_name='dev')
+    train_corpus, dev_corpus = ankura.pipeline.train_test_split(split_corpus[1], num_train=1000000, num_test=1000, random_seed=seed, return_ids=True, save_dir=LOCALDIR, vocab_size=vocab_size, test_name='dev')
 
     split = split_corpus[1]
     train = train_corpus[1]
@@ -163,12 +176,22 @@ def run_experiment(corpus_name='amlrg', model='semi', num_topics=80, seed=None, 
     train_target = [doc_label_map[doc.metadata[label_name]] for doc in train.documents]
     test_target = [doc_label_map[doc.metadata[label_name]] for doc in test.documents]
 
+    mem = psutil.Process().memory_info()
+    res = mem.rss/BYTES_TO_GIG
+    vir = mem.vms/BYTES_TO_GIG
+    print(f'After splitting corpora and targets: Resident Set: {res}, Virtual Set: {vir}')
+
     print('Calculating Q...')
     sys.stdout.flush()
     q_start = time.time()
     Q = q_retriever(split, label_name, train_labeled_docs)
     q_end = time.time()
     q_time = q_end - q_start
+
+    mem = psutil.Process().memory_info()
+    res = mem.rss/BYTES_TO_GIG
+    vir = mem.vms/BYTES_TO_GIG
+    print(f'After retrieving Q: Resident Set: {res}, Virtual Set: {vir}')
 
     print('Retrieving anchors...')
     sys.stdout.flush()
